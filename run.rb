@@ -1,41 +1,26 @@
-# NOTE: Following MUST be done before you start:
-# 0) Put phone in Do Not Disturb mode (notifications will interrupt screenshots)
-# 1) Start Pokemon Go
-# 2) Start Poke Genie
-# 3) Set coordinates below to Poke Genie's location (if you moved it)
-# 4) Open Pokemon list (and make sure it won't go black e.g. by tilting the phone upside down)
-# 5) Set desired sort order and/or filters in Pokemon Go
-# 6) Set the number of Pokemon to process below
-# 7) Hide keyboard on phone if it is visible
-# 8) Scroll to VERY TOP of Pokemon list
-# 7) RUN
-
 require 'oily_png'
 Loc = Struct.new(:x, :y)
 SSLoc = Struct.new(:loc, :color)
 
-# STEP 3 - Adjust the coordinates below if you have it in a different location
+# NOTE: Please read the instructions!
+# 0) Put phone in Do Not Disturb mode (notifications will interrupt screenshots)
+# 1) Start Pokemon Go
+# 2) Start Poke Genie
+# 3) Set coordinates below to Poke Genie's location (you may find Show Pointer Location in developer options helpful for this):
 POKEGENIE_LOC = Loc.new(1300, 1370)
-
-# STEP 6 - How many Pokemon to process
-POKEMON_START = 1
-POKEMON_MAX = 30
+# 4) Open the Pokemon list, and do whatever sorting/filtering you want to select the Pokemon you want to rename
+# 5) Set the desired number of Pokemon to rename:
+POKEMON_TO_PROCESS = 3
+# 6) Tap the Pokemon you want to start at, so its info is showing
+# 7) RUN
+# 8) DO NOT TOUCH YOUR PHONE WHILE RUNNING - tapping is done by coordinates regardless of what's on screen, so manually
+#    playing with it may cause taps on unintended parts of the screen
 
 # DO NOT EDIT BELOW HERE UNLESS YOUR UI SETTINGS ARE DIFFERENT
 # (e.g. different phone)
+# Coordinates below are 
 
-# Pokemon list settings
-POKELIST_LOC = Loc.new(300, 900)
-POKELIST_LOC_DELTA = Loc.new(400, 500)
-POKELIST_PERCOL = 3
-
-# Auto scroll settings
-POKELIST_SCROLL_ROWSTART = 4
-POKELIST_SCROLL_DY_EVEN = 314
-POKELIST_SCROLL_DY_ODD = 313
-POKELIST_SCROLL_DELAY = 800
-
-# Other UI settings
+# UI element locations (in pixels)
 POKEMON_INFO_CLOSE_LOC = Loc.new(730, 2800)
 POKEMON_INFO_MENU_LOC = Loc.new(1250, 2800)
 POKEMON_INFO_APPRAISE_LOC = Loc.new(1250, 2260)
@@ -43,9 +28,16 @@ POKEMON_INFO_APPRAISE_DISMISS_LOC = Loc.new(1030, 1850)
 POKEGENIE_DISMISS_LOC = Loc.new(125, 230)
 POKEMON_INFO_RENAME_LOC = Loc.new(720, 1230)
 POKEMON_INFO_RENAME_OK_LOC = Loc.new(700, 1600)
-POKEMON_NAME_LENGTH = 12
+POKEMON_INFO_SWIPE_START = Loc.new(1100, 1700)
+POKEMON_INFO_SWIPE_END = Loc.new(400, 1700)
+GBOARD_BACKSPACE = Loc.new(1330, 2560)
 
-# Screenshot coordinates to check whether an operation succeeded
+# Swipe gesture durations (in milliseconds)
+POKEMON_INFO_SWIPE_DURATION = 300
+DELETE_HOLD_DURATION = 50
+DELETE_SWIPE_DURATION = 400
+
+# Screenshot coordinates (in pixels) and colors (in RGBA hex) to check whether an operation succeeded
 SCREENSHOT_POKELIST = SSLoc.new(Loc.new(760, 350), '#fbfffaff') # white background of list
 SCREENSHOT_POKEMON_INFO = SSLoc.new(Loc.new(680, 2800), '#1c8796ff') # green background of close button
 SCREENSHOT_POKEMON_MENU = SSLoc.new(Loc.new(100, 200), '#4ab483ff') # greenish gradient for menu background
@@ -54,22 +46,25 @@ SCREENSHOT_POKEMON_APPRAISE_BARS = SSLoc.new(Loc.new(660, 2130), '#ffffffff') # 
 SCREENSHOT_POKEGENIE = SSLoc.new(Loc.new(125, 226), '#455a64ff') # gray X of close button
 SCREENSHOT_RENAME = SSLoc.new(Loc.new(1150, 1620), '#43d0a5ff') # greenish background of OK button
 
-# Keycode settings - see https://developer.android.com/reference/android/view/KeyEvent#constants_1
+# Keycode settings - see https://developer.android.com/reference/android/view/KeyEvent#constants_1 for a list
 KEYCODE_BACKSPACE = 67
 KEYCODE_PASTE = 279
 
 # ADB settings
-ADB_SEND_ENABLE = true
-ADB_SCREENSHOT_VERIFY_ENABLE = true
+ADB_SEND_ENABLE = true # set to false to do a dry run
+ADB_SCREENSHOT_VERIFY_ENABLE = true # set to false to assume everything succeeded and not check with screenshots (e.g. if you're watching...)
 ADB_SCREENSHOT_VERIFY_RETRY_ATTEMPTS = 10
 ADB_SCREENSHOT_VERIFY_RETRY_DELAY = 4
 
 # Miscellaneous delays (in seconds)
-DELAY_NO_VERIFY = 0.6
-DELAY_VERIFY = 1
-DELAY_SLOW = 3
+DELAY_NO_VERIFY = 0.5
+DELAY_VERIFY = 0.9
+DELAY_SLOW = 2
 DELAY_NONE = 0
-DELAY_SCROLL = 4
+DELAY_NEXT_POKEMON = 0
+
+# Miscellaneous constants
+POKEMON_NAME_LENGTH = 12
 
 def adb_verify_screenshot(ssloc)
   unless ADB_SCREENSHOT_VERIFY_ENABLE
@@ -121,6 +116,17 @@ def adb_swipe(start, finish, duration, wait)
   sleep(ADB_SEND_ENABLE ? wait : 0)
 end
 
+def adb_backspace_swipe(loc, dx, hold_duration, swipe_duration, wait)
+  puts "adb_backspace_swipe #{loc.x} #{loc.y}"
+  if ADB_SEND_ENABLE
+    `adb shell "input swipe #{loc.x} #{loc.y} #{loc.x} #{loc.y} #{hold_duration} && input swipe #{loc.x} #{loc.y} #{loc.x + dx} #{loc.y} #{swipe_duration}"`
+  end
+  unless $?.success?
+    throw 'adb_backspace_swipe failed - ' + $?.exitstatus
+  end
+  sleep(ADB_SEND_ENABLE ? wait : 0)
+end
+
 def adb_key(keycode, wait)
   puts "adb_key #{keycode}"
   if ADB_SEND_ENABLE
@@ -162,25 +168,14 @@ def list_y(row)
 end
 
 row_even = true
-adb_verify_screenshot(SCREENSHOT_POKELIST) # make sure we start out in the list
-for i in POKEMON_START-1..POKEMON_MAX-1 do
-  puts "Scanning #{i+1} of #{POKEMON_MAX}"
-  row = i / POKELIST_PERCOL
-  col = i % POKELIST_PERCOL
-  pokemon_loc = Loc.new(list_x(col), row >= POKELIST_SCROLL_ROWSTART ? list_y(POKELIST_SCROLL_ROWSTART - 1) : list_y(row))
-  puts ">> row #{row}, col #{col} / #{pokemon_loc.x},#{pokemon_loc.y}"
-
-  # Open Pokemon info screen
-  adb_tap(pokemon_loc, 1)
-  adb_verify_screenshot(SCREENSHOT_POKEMON_INFO)
+adb_verify_screenshot(SCREENSHOT_POKEMON_INFO) # make sure we start out in Pokemon info
+for i in 1..POKEMON_TO_PROCESS do
+  puts "Scanning #{i} of #{POKEMON_TO_PROCESS}"
 
   # Open appraisal screen and get to the part that shows the bars
   adb_tap(POKEMON_INFO_MENU_LOC, DELAY_NO_VERIFY)
-  # adb_verify_screenshot(SCREENSHOT_POKEMON_MENU)
   adb_tap(POKEMON_INFO_APPRAISE_LOC, DELAY_NO_VERIFY)
-  # adb_verify_screenshot(SCREENSHOT_POKEMON_APPRAISE_INITIAL)
   adb_tap(POKEMON_INFO_APPRAISE_DISMISS_LOC, DELAY_NO_VERIFY)
-  # adb_verify_screenshot(SCREENSHOT_POKEMON_APPRAISE_BARS)
 
   # Invoke Poke Genie to calculate percentage and copy the new Pokemon name to the clipboard
   adb_tap(POKEGENIE_LOC, DELAY_SLOW)
@@ -188,16 +183,14 @@ for i in POKEMON_START-1..POKEMON_MAX-1 do
 
   # Dismiss Poke Genie and the appraisal screen
   adb_tap(POKEGENIE_DISMISS_LOC, DELAY_NO_VERIFY)
-  # adb_verify_screenshot(SCREENSHOT_POKEMON_APPRAISE_BARS)
   adb_tap(POKEMON_INFO_APPRAISE_DISMISS_LOC, DELAY_NO_VERIFY)
-  # adb_verify_screenshot(SCREENSHOT_POKEMON_INFO)
 
   # Open rename dialog
   adb_tap(POKEMON_INFO_RENAME_LOC, DELAY_NO_VERIFY)
-  # adb_verify_screenshot(SCREENSHOT_RENAME)
 
-  # Remove old name
-  adb_key_repeat(KEYCODE_BACKSPACE, POKEMON_NAME_LENGTH, DELAY_NONE)
+  # Remove old name - switch to adb_key_repeat if adb_backspace_swipe is unreliable for you
+  # adb_key_repeat(KEYCODE_BACKSPACE, POKEMON_NAME_LENGTH, DELAY_NONE)
+  adb_backspace_swipe(GBOARD_BACKSPACE, -200, DELETE_HOLD_DURATION, DELETE_SWIPE_DURATION, DELAY_NONE)
 
   # Paste new name
   adb_key(KEYCODE_PASTE, DELAY_NONE)
@@ -209,21 +202,9 @@ for i in POKEMON_START-1..POKEMON_MAX-1 do
   adb_tap(POKEMON_INFO_RENAME_OK_LOC, DELAY_VERIFY)
   adb_verify_screenshot(SCREENSHOT_POKEMON_INFO)
 
-  # Close Pokemon info screen
-  adb_tap(POKEMON_INFO_CLOSE_LOC, DELAY_VERIFY)
-  adb_verify_screenshot(SCREENSHOT_POKELIST)
+  # Swipe to next
+  adb_swipe(POKEMON_INFO_SWIPE_START, POKEMON_INFO_SWIPE_END, POKEMON_INFO_SWIPE_DURATION, DELAY_NEXT_POKEMON)
 
-  # Scroll the Pokemon list by one row if needed
-  if (row >= POKELIST_SCROLL_ROWSTART - 1 && col + 1 == POKELIST_PERCOL)
-    # Trigger scroll & reset back to row before the end
-    swipe_start = Loc.new(list_x(0), list_y(POKELIST_SCROLL_ROWSTART - 1))
-    # this offset thing is because the fling scrolling isn't exact
-    # so we alternate scrolling slightly too far and slightly not far enough
-    swipe_end = Loc.new(swipe_start.x, swipe_start.y - (row_even ? POKELIST_SCROLL_DY_EVEN : POKELIST_SCROLL_DY_ODD))
-    row_even = !row_even
-    adb_swipe(swipe_start, swipe_end, POKELIST_SCROLL_DELAY, DELAY_SCROLL)
-  end
-
-  # look like a human
+  # Look like a human
   sleep(rand())
 end
