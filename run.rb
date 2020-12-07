@@ -3,14 +3,12 @@ Loc = Struct.new(:x, :y)
 SSLoc = Struct.new(:loc, :color)
 
 # NOTE: Please read the instructions!
-# 0) Put phone in Do Not Disturb mode (notifications will interrupt screenshots)
-# 1) Start Pokemon Go
-# 2) Start Poke Genie
-# 3) Set coordinates below to Poke Genie's location (you may find Show Pointer Location in developer options helpful for this):
-POKEGENIE_LOC = Loc.new(1300, 1370)
+# 1) Put phone in Do Not Disturb mode (notifications will interrupt screenshots)
+# 2) Start Pokemon Go
+# 3) Start Poke Genie
 # 4) Open the Pokemon list, and do whatever sorting/filtering you want to select the Pokemon you want to rename
 # 5) Set the desired number of Pokemon to rename:
-POKEMON_TO_PROCESS = 3
+POKEMON_TO_PROCESS = 1
 # 6) Tap the Pokemon you want to start at, so its info is showing
 # 7) RUN
 # 8) DO NOT TOUCH YOUR PHONE WHILE RUNNING - tapping is done by coordinates regardless of what's on screen, so manually
@@ -18,23 +16,34 @@ POKEMON_TO_PROCESS = 3
 
 # DO NOT EDIT BELOW HERE UNLESS YOUR UI SETTINGS ARE DIFFERENT
 # (e.g. different phone)
-# Coordinates below are 
+
+# Reference screen size of my phone (Google Pixel 4 XL)
+# coordinates will be scaled relative to this
+REF_SIZE = Loc.new(1440, 3040)
+
+# Google Pixel 4 XL
+PHONE_SIZE = Loc.new(1440, 3040)
+PHONE_TOP_MARGIN = 0
+
+# Google Pixel 5
+# PHONE_SIZE = Loc.new(1080, 2340)
+# PHONE_TOP_MARGIN = 150
 
 # UI element locations (in pixels)
 POKEMON_INFO_CLOSE_LOC = Loc.new(730, 2800)
 POKEMON_INFO_MENU_LOC = Loc.new(1250, 2800)
-POKEMON_INFO_APPRAISE_LOC = Loc.new(1250, 2260)
+POKEMON_INFO_APPRAISE_LOC = Loc.new(1250, 2075) # they moved it up to add Tag
 POKEMON_INFO_APPRAISE_DISMISS_LOC = Loc.new(1030, 1850)
-POKEGENIE_DISMISS_LOC = Loc.new(125, 230)
-POKEMON_INFO_RENAME_LOC = Loc.new(720, 1230)
-POKEMON_INFO_RENAME_OK_LOC = Loc.new(700, 1600)
+POKEMON_INFO_RENAME_LOC = Loc.new(720, 1210)
+POKEMON_INFO_RENAME_DISMISS_LOC = Loc.new(720, 1120)
+POKEMON_INFO_RENAME_OK_LOC = Loc.new(700, 1650)
 POKEMON_INFO_SWIPE_START = Loc.new(1100, 1700)
 POKEMON_INFO_SWIPE_END = Loc.new(400, 1700)
 GBOARD_BACKSPACE = Loc.new(1330, 2560)
 
 # Swipe gesture durations (in milliseconds)
-POKEMON_INFO_SWIPE_DURATION = 300
-DELETE_HOLD_DURATION = 50
+POKEMON_INFO_SWIPE_DURATION = 200
+DELETE_HOLD_DURATION = 60
 DELETE_SWIPE_DURATION = 400
 
 # Screenshot coordinates (in pixels) and colors (in RGBA hex) to check whether an operation succeeded
@@ -43,7 +52,7 @@ SCREENSHOT_POKEMON_INFO = SSLoc.new(Loc.new(680, 2800), '#1c8796ff') # green bac
 SCREENSHOT_POKEMON_MENU = SSLoc.new(Loc.new(100, 200), '#4ab483ff') # greenish gradient for menu background
 SCREENSHOT_POKEMON_APPRAISE_INITIAL = SSLoc.new(Loc.new(100, 2600), '#ffffffff') # white background of textbox
 SCREENSHOT_POKEMON_APPRAISE_BARS = SSLoc.new(Loc.new(660, 2130), '#ffffffff') # white background of appraisal bars
-SCREENSHOT_POKEGENIE = SSLoc.new(Loc.new(125, 226), '#455a64ff') # gray X of close button
+SCREENSHOT_POKEGENIE = SSLoc.new(Loc.new(10, 1010), '#eceff1ff') # gray background of Poke Genie IVision results
 SCREENSHOT_RENAME = SSLoc.new(Loc.new(1150, 1620), '#43d0a5ff') # greenish background of OK button
 
 # Keycode settings - see https://developer.android.com/reference/android/view/KeyEvent#constants_1 for a list
@@ -58,15 +67,20 @@ ADB_SCREENSHOT_VERIFY_RETRY_DELAY = 4
 
 # Miscellaneous delays (in seconds)
 DELAY_NO_VERIFY = 0.5
-DELAY_VERIFY = 0.9
+DELAY_VERIFY = 1
 DELAY_SLOW = 2
 DELAY_NONE = 0
 DELAY_NEXT_POKEMON = 0
+DELAY_IVISION = 1.5 # it's a verify delay, but IVision takes longer sometimes
 
 # Miscellaneous constants
 POKEMON_NAME_LENGTH = 12
 
-def adb_verify_screenshot(ssloc)
+def scale(loc, top)
+  return Loc.new((PHONE_SIZE.x.to_f / REF_SIZE.x.to_f * loc.x.to_f).to_i, (PHONE_SIZE.y.to_f / REF_SIZE.y.to_f * loc.y.to_f).to_i + (top ? PHONE_TOP_MARGIN : 0))
+end
+
+def adb_verify_screenshot(ssloc, top = false)
   unless ADB_SCREENSHOT_VERIFY_ENABLE
     return
   end
@@ -78,7 +92,8 @@ def adb_verify_screenshot(ssloc)
       throw 'adb_verify_screenshot failed - ' + $?.exitstatus
     end
     image = ChunkyPNG::Image.from_file(pngname)
-    pixel = image.get_pixel(ssloc.loc.x, ssloc.loc.y)
+    loc = scale(ssloc.loc, top)
+    pixel = image.get_pixel(loc.x, loc.y)
     hex = ChunkyPNG::Color.to_hex(pixel)
     exp = ChunkyPNG::Color.from_hex(ssloc.color)
 
@@ -94,7 +109,8 @@ def adb_verify_screenshot(ssloc)
   throw "Screenshot validation failure exceeded retry attempts. Maybe the game locked up or the servers went down? Start again manually."
 end
 
-def adb_tap(loc, wait)
+def adb_tap(loc, wait, top = false)
+  loc = scale(loc, top)
   puts("adb_tap #{loc.x} #{loc.y}")
   if ADB_SEND_ENABLE
     `adb shell input tap #{loc.x} #{loc.y}`
@@ -105,7 +121,9 @@ def adb_tap(loc, wait)
   sleep(ADB_SEND_ENABLE ? wait : 0)
 end
 
-def adb_swipe(start, finish, duration, wait)
+def adb_swipe(start, finish, duration, wait, top = false)
+  start = scale(start, top)
+  finish = scale(finish, top)
   puts "adb_swipe #{start.x} #{start.y} #{finish.x} #{finish.y} #{duration}"
   if ADB_SEND_ENABLE
     `adb shell input swipe #{start.x} #{start.y} #{finish.x} #{finish.y} #{duration}`
@@ -116,7 +134,9 @@ def adb_swipe(start, finish, duration, wait)
   sleep(ADB_SEND_ENABLE ? wait : 0)
 end
 
-def adb_backspace_swipe(loc, dx, hold_duration, swipe_duration, wait)
+def adb_backspace_swipe(loc, dx, hold_duration, swipe_duration, wait, top = false)
+  loc = scale(loc, top)
+  dx = scale(Loc.new(dx, 0), top).x # scale just the X coordinate
   puts "adb_backspace_swipe #{loc.x} #{loc.y}"
   if ADB_SEND_ENABLE
     `adb shell "input swipe #{loc.x} #{loc.y} #{loc.x} #{loc.y} #{hold_duration} && input swipe #{loc.x} #{loc.y} #{loc.x + dx} #{loc.y} #{swipe_duration}"`
@@ -159,14 +179,6 @@ def adb_key_repeat(keycode, repeat, wait)
   sleep(ADB_SEND_ENABLE ? wait : 0)
 end
 
-def list_x(col)
-  return POKELIST_LOC.x + col * POKELIST_LOC_DELTA.x
-end
-
-def list_y(row)
-  return POKELIST_LOC.y + row * POKELIST_LOC_DELTA.y
-end
-
 row_even = true
 adb_verify_screenshot(SCREENSHOT_POKEMON_INFO) # make sure we start out in Pokemon info
 for i in 1..POKEMON_TO_PROCESS do
@@ -175,18 +187,16 @@ for i in 1..POKEMON_TO_PROCESS do
   # Open appraisal screen and get to the part that shows the bars
   adb_tap(POKEMON_INFO_MENU_LOC, DELAY_NO_VERIFY)
   adb_tap(POKEMON_INFO_APPRAISE_LOC, DELAY_NO_VERIFY)
-  adb_tap(POKEMON_INFO_APPRAISE_DISMISS_LOC, DELAY_NO_VERIFY)
+  adb_tap(POKEMON_INFO_APPRAISE_DISMISS_LOC, DELAY_IVISION)
 
-  # Invoke Poke Genie to calculate percentage and copy the new Pokemon name to the clipboard
-  adb_tap(POKEGENIE_LOC, DELAY_SLOW)
+  # Wait for Poke Genie IVision to display
   adb_verify_screenshot(SCREENSHOT_POKEGENIE)
 
-  # Dismiss Poke Genie and the appraisal screen
-  adb_tap(POKEGENIE_DISMISS_LOC, DELAY_NO_VERIFY)
+  # Dismiss the appraisal screen
   adb_tap(POKEMON_INFO_APPRAISE_DISMISS_LOC, DELAY_NO_VERIFY)
 
   # Open rename dialog
-  adb_tap(POKEMON_INFO_RENAME_LOC, DELAY_NO_VERIFY)
+  adb_tap(POKEMON_INFO_RENAME_LOC, DELAY_NO_VERIFY, true) # this button is offset on some phones due to the dead zone at the top
 
   # Remove old name - switch to adb_key_repeat if adb_backspace_swipe is unreliable for you
   # adb_key_repeat(KEYCODE_BACKSPACE, POKEMON_NAME_LENGTH, DELAY_NONE)
@@ -196,7 +206,7 @@ for i in 1..POKEMON_TO_PROCESS do
   adb_key(KEYCODE_PASTE, DELAY_NONE)
 
   # Dismiss keyboard
-  adb_tap(POKEMON_INFO_RENAME_OK_LOC, DELAY_NO_VERIFY)
+  adb_tap(POKEMON_INFO_RENAME_DISMISS_LOC, DELAY_NO_VERIFY)
 
   # Rename Pokemon
   adb_tap(POKEMON_INFO_RENAME_OK_LOC, DELAY_VERIFY)
